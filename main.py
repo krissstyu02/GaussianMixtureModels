@@ -1,0 +1,167 @@
+import numpy as np
+from sklearn.mixture import GaussianMixture
+import tkinter as tk
+from PIL import ImageTk, Image
+import imageio
+import threading
+from tkinter import filedialog, ttk
+
+selected_image = list[0]
+
+# Функция для загрузки изображения с компьютера
+def load_image():
+    global selected_image
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        selected_image = imageio.imread(file_path, pilmode='RGB')  # Изменено на pilmode='RGB'
+        return selected_image
+    return None
+
+
+def segment_image():
+
+    # Получаем выбранное изображение
+    image = selected_image
+    if image is not None:
+        covariance_type = covariance_type_var.get()
+        # Получаем значение количества компонент смеси GMM из ползунка
+        n_components = int(n_components_slider.get())
+        max_iter=int(max_iter_entry.get())
+        n_init = int(n_init_entry.get())
+        init_params=init_params_var.get()
+
+        def segmentation_task():
+            # Включаем виджет прогресса перед выполнением сегментации
+            progress_bar.start()
+
+            # Преобразуем изображение в одномерный массив
+            image_flat = image.reshape(-1, 3)  # Изменено на .reshape(-1, 3) для работы с RGB форматом
+
+            # Подготовим данные для обучения смешанной гауссовой модели
+            X = image_flat
+
+            # Инициализируем смешанную гауссову модель
+            gmm = GaussianMixture(n_components=n_components,covariance_type=covariance_type,max_iter=max_iter,
+                                  n_init=n_init,init_params=init_params)
+
+            # Обучим модель на данных
+            gmm.fit(X)
+
+            # Посчитаем оценки апостериорной вероятности для каждого пикселя
+            probs = gmm.predict_proba(X)
+
+            # Найдем индекс компоненты с максимальной оценкой апостериорной вероятности для каждого пикселя
+            max_prob_idx = np.argmax(probs, axis=1)
+
+            # Построим сегментированное изображение, используя компоненты смеси с наибольшей вероятностью
+            segmented_image = np.zeros_like(image_flat)
+            for i in range(n_components):
+                segmented_image[max_prob_idx == i] = gmm.means_[i]
+
+            segmented_image = segmented_image.reshape(image.shape)
+            segmented_img = Image.fromarray(segmented_image).resize((300, 300))
+            segmented_img_tk = ImageTk.PhotoImage(segmented_img)
+
+            segmented_text = tk.Label(root, text="Сегментированное изображение")
+            segmented_text.grid(row=2, column=1)
+            segmented_label.config(image=segmented_img_tk)
+            # Обновляем отображение
+            segmented_label.image = segmented_img_tk
+
+            # Выключаем виджет прогресса после завершения сегментации
+            progress_bar.stop()
+
+        # Создаем и запускаем поток для выполнения сегментации
+        segmentation_thread = threading.Thread(target=segmentation_task)
+        segmentation_thread.start()
+
+
+def show_image():
+    # Загружаем изображение
+    image = load_image()
+    if image is not None:
+        # Отображаем изображения в окне tkinter
+        original_img = Image.fromarray(image).resize((300, 300))
+
+        # Преобразуем изображения в объекты ImageTk
+        original_img_tk = ImageTk.PhotoImage(original_img)
+
+        original_label.config(image=original_img_tk)
+        # Обновляем отображение
+        original_label.image = original_img_tk
+        original_text = tk.Label(root, text="Исходное изображение")
+        original_text.grid(row=2, column=0)
+
+# Создаем окно tkinter для выбора изображения
+root = tk.Tk()
+# Создаем новое окно tkinter
+root.title("Сегментированное изображение")
+root.geometry("900x500")  # Устанавливаем размеры окна: ширина x высота
+
+# Создаем и размещаем метки с изображениями и подписями в окне
+original_label = tk.Label(root, text="Исходное изображение")
+original_label.grid(row=1, column=0, padx=10, pady=10)
+
+segmented_label = tk.Label(root, text="Сегментированное изображение")
+segmented_label.grid(row=1, column=1, padx=10, pady=10)
+
+# Фрейм для параметров GMM
+gmm_frame = tk.Frame(root, bd=2, relief="groove")
+gmm_frame.grid(row=0, column=3, rowspan=10, padx=10, pady=10, sticky="nsew")
+
+# Создаем метку и ползунок для выбора количества компонент смеси GMM
+n_components_label = tk.Label(gmm_frame, text="Количество компонент смеси GMM:")
+n_components_label.grid(row=0, column=0, padx=10, pady=10)
+
+n_components_slider = tk.Scale(gmm_frame, from_=1, to=10, orient=tk.HORIZONTAL)
+n_components_slider.grid(row=1, column=0, padx=10, pady=10)
+
+# Создаем переменную для хранения выбранного типа ковариационной матрицы
+covariance_type_var = tk.StringVar(root)
+covariance_type_var.set('full')  # Устанавливаем значение по умолчанию
+
+# Создаем меню для выбора типа ковариационной матрицы
+covariance_type_menu = tk.OptionMenu(gmm_frame, covariance_type_var, 'full', 'tied', 'diag', 'spherical')
+covariance_type_menu.grid(row=3, column=0, padx=10, pady=10)
+covariance_type_label = tk.Label(gmm_frame, text="Тип ковариационной матрицы:")
+covariance_type_label.grid(row=2, column=0, padx=10, pady=10)
+
+# Создаем метку и поле ввода для выбора максимального количества итераций
+max_iter_label = tk.Label(gmm_frame, text="Максимальное количество итераций:")
+max_iter_label.grid(row=4, column=0, padx=10, pady=10)
+
+max_iter_var = tk.StringVar(root, value="100")
+max_iter_entry = tk.Entry(gmm_frame, textvariable=max_iter_var)
+max_iter_entry.grid(row=5, column=0, padx=10, pady=10)
+
+# Создаем метку и поле ввода для выбора количества инициализаций
+n_init_label = tk.Label(gmm_frame, text="Количество инициализаций:")
+n_init_label.grid(row=6, column=0, padx=10, pady=10)
+
+n_init_var = tk.StringVar(root, value="1")
+n_init_entry = tk.Entry(gmm_frame, textvariable=n_init_var)
+n_init_entry.grid(row=7, column=0, padx=10, pady=10)
+
+# Создаем метку и выпадающий список для выбора метода инициализации параметров
+init_params_label = tk.Label(gmm_frame, text="Метод инициализации параметров:")
+init_params_label.grid(row=8, column=0, padx=10, pady=10)
+
+init_params_var = tk.StringVar(root)
+init_params_var.set('kmeans')  # Устанавливаем значение по умолчанию
+
+init_params_menu = tk.OptionMenu(gmm_frame, init_params_var, 'kmeans', 'k-means++', 'random', 'random_from_data')
+init_params_menu.grid(row=9, column=0, padx=10, pady=10)
+
+# Создаем кнопку "Выбрать изображение"
+button = tk.Button(root, text="Выбрать изображение", command=show_image)
+button.grid(row=0, column=0, padx=10, pady=10)
+
+# Создаем кнопку "Сегментировать изображение"
+segment_button = tk.Button(root, text="Сегментировать изображение", command=segment_image)
+segment_button.grid(row=0, column=1, padx=10, pady=10)
+
+# Создаем полосу загрузки
+progress_bar = ttk.Progressbar(root, orient="horizontal", mode="indeterminate")
+progress_bar.grid(row=3, columnspan=3, pady=10)
+
+root.mainloop()
